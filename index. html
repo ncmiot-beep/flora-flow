@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flora Flow | Physics Dept</title>
+    
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-gauges/gauge.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
+    <style>
+        :root { --glass: rgba(0, 0, 0, 0.8); --accent: #4CAF50; }
+        
+        body {
+            margin: 0; font-family: 'Segoe UI', sans-serif; color: white;
+            background: linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.5)), 
+                        url('https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=1600&q=80');
+            background-size: cover; background-attachment: fixed;
+        }
+
+        /* Header & Logo */
+        header { padding: 20px 5%; display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.4); }
+        .logo-placeholder { width: 140px; height: 55px; border: 1px dashed white; display: flex; align-items: center; justify-content: center; font-size: 10px; opacity: 0.7; }
+        h1 { font-weight: 900; font-size: 2.5em; letter-spacing: 5px; margin: 0; text-shadow: 2px 2px 10px rgba(0,0,0,0.5); }
+
+        /* Overflow Menu */
+        .menu-btn { background: none; border: none; color: white; font-size: 35px; cursor: pointer; }
+        .dropdown { display: none; position: absolute; right: 5%; top: 80px; background: var(--glass); border-radius: 12px; min-width: 180px; z-index: 1000; border: 1px solid #444; overflow: hidden; }
+        .dropdown a { color: white; padding: 15px; text-decoration: none; display: block; border-bottom: 1px solid #333; cursor: pointer; }
+        .dropdown a:hover { background: var(--accent); }
+
+        /* Dashboard Components */
+        .container { padding: 20px; max-width: 1200px; margin: auto; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .card { background: var(--glass); backdrop-filter: blur(12px); border-radius: 20px; padding: 25px; border: 1px solid rgba(255,255,255,0.1); text-align: center; }
+        
+        .status-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding: 0 10px; }
+        .dot { height: 12px; width: 12px; border-radius: 50%; display: inline-block; margin-right: 8px; box-shadow: 0 0 8px currentColor; }
+
+        /* Toggle Switches */
+        .switch { position: relative; width: 50px; height: 26px; display: inline-block; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #444; transition: .4s; border-radius: 34px; }
+        .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 4px; bottom: 4px; background: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background: var(--accent); }
+        input:checked + .slider:before { transform: translateX(24px); }
+
+        footer { margin-top: 60px; padding: 40px; background: rgba(0,0,0,0.9); text-align: center; border-top: 4px solid var(--accent); }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="logo-placeholder">COLLEGE LOGO</div>
+    <h1>FLORA FLOW</h1>
+    <div style="position: relative;">
+        <button class="menu-btn" onclick="toggleMenu()">&#8942;</button>
+        <div class="dropdown" id="menu">
+            <a onclick="adminPrompt()">Admin Access</a>
+            <a onclick="showSection('analytics')">Analytics</a>
+            <a onclick="exportExcel()">Data Export</a>
+        </div>
+    </div>
+</header>
+
+<div class="container">
+    <div class="status-row">
+        <div>
+            <span class="dot" id="online-dot" style="background: grey; color: grey;"></span>
+            <span id="online-text">Connecting...</span>
+        </div>
+        <div>
+            <span style="font-size: 0.9em; margin-right: 10px;">Realtime Mode</span>
+            <label class="switch">
+                <input type="checkbox" id="rt-toggle" onchange="switchDataSource()">
+                <span class="slider"></span>
+            </label>
+        </div>
+    </div>
+
+    <main id="dashboard-view" class="grid">
+        <div class="card">
+            <h3>Humidity</h3>
+            <canvas id="gauge-hum"></canvas>
+            <h2 id="txt-hum">--%</h2>
+        </div>
+        <div class="card">
+            <h3>Soil Moisture</h3>
+            <canvas id="gauge-moist"></canvas>
+            <h2 id="txt-moist">--%</h2>
+        </div>
+        <div class="card">
+            <h3>Temperature</h3>
+            <canvas id="gauge-temp"></canvas>
+            <h2 id="txt-temp">--°C</h2>
+        </div>
+
+        <div class="card" style="grid-column: 1 / -1;">
+            <h3>Automation Logs (Live Status)</h3>
+            <div style="display: flex; justify-content: space-around; padding: 10px;">
+                <div>Fan: <strong id="st-fan">--</strong></div>
+                <div>Humidifier: <strong id="st-humid">--</strong></div>
+                <div>Water Valve: <strong id="st-valve">--</strong></div>
+            </div>
+        </div>
+    </main>
+
+    <div id="analytics-view" class="card hidden">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <button onclick="showSection('dashboard')" style="background: var(--accent); color: white; border: none; padding: 10px 20px; border-radius: 8px;">&larr; Back</button>
+            <h2>Environmental Trends</h2>
+            <div style="width: 50px;"></div>
+        </div>
+        <div style="height: 400px;"><canvas id="historyChart"></canvas></div>
+    </div>
+</div>
+
+<footer>
+    <p><strong>NIRMALA COLLEGE MUVATTUPUZHA</strong></p>
+    <p>DEPARTMENT OF PHYSICS</p>
+    <p style="font-size: 0.8em; opacity: 0.5; margin-top: 10px;">Smart Hydroponic Dashboard v1.0</p>
+</footer>
+
+<script>
+    // --- 1. FIREBASE CONFIGURATION ---
+    // REPLACE THESE WITH YOUR KEYS FROM FIREBASE CONSOLE
+    const firebaseConfig = {
+        apiKey: "YOUR_API_KEY",
+        authDomain: "YOUR_PROJECT.firebaseapp.com",
+        databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
+        projectId: "YOUR_PROJECT",
+        storageBucket: "YOUR_PROJECT.appspot.com",
+        messagingSenderId: "YOUR_SENDER_ID",
+        appId: "YOUR_APP_ID"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    // --- 2. ADMIN & SECURITY ---
+    let passkey = "1234";
+    function adminPrompt() {
+        let input = prompt("Enter Admin Passkey:");
+        if(input === passkey) {
+            let newThreshold = prompt("Set New Temperature Threshold (0-50):");
+            if(newThreshold) db.ref('admin/settings/temp_limit').set(newThreshold);
+            alert("Settings Updated.");
+        } else { alert("Access Denied."); }
+        toggleMenu();
+    }
+
+    // --- 3. GAUGES INITIALIZATION ---
+    const gBase = { width: 240, height: 240, minValue: 0, maxValue: 100, animationDuration: 1500, borders: false, needleType: "arrow", valueInt: 1, valueDec: 1 };
+    
+    const gHum = new RadialGauge({...gBase, renderTo: 'gauge-hum', units: '%'}).draw();
+    const gMoist = new RadialGauge({...gBase, renderTo: 'gauge-moist', units: '%', colorPlate: "#3e2723"}).draw();
+    const gTemp = new RadialGauge({...gBase, renderTo: 'gauge-temp', units: '°C', maxValue: 50}).draw();
+
+    // --- 4. DATA LOGIC ---
+    function switchDataSource() {
+        const isRT = document.getElementById('rt-toggle').checked;
+        const path = isRT ? 'realtime_mon' : 'monit';
+        
+        // Unsubscribe old listener and start new one
+        db.ref('monit').off();
+        db.ref('realtime_mon').off();
+
+        db.ref(path).on('value', snap => {
+            const val = snap.val();
+            if(val) {
+                // Mapping keys based on your request (e.g., hum vs relhum)
+                let h = isRT ? val.relhum : val.hum;
+                let m = isRT ? val.relmoist : val.moist;
+                let t = isRT ? val.reltem : val.tem;
+
+                gHum.value = h || 0;
+                gMoist.value = m || 0;
+                gTemp.value = t || 0;
+                
+                document.getElementById('txt-hum').innerText = (h || 0) + "%";
+                document.getElementById('txt-moist').innerText = (m || 0) + "%";
+                document.getElementById('txt-temp').innerText = (t || 0) + "°C";
+            }
+        });
+    }
+
+    // Heartbeat Monitor
+    db.ref('is_online').on('value', snap => {
+        const online = snap.val();
+        const d = document.getElementById('online-dot');
+        d.style.background = online ? "lime" : "red";
+        d.style.color = online ? "lime" : "red";
+        document.getElementById('online-text').innerText = online ? "Microcontroller Online" : "Microcontroller Offline";
+    });
+
+    // Actuator Status (stat/)
+    db.ref('stat').on('value', snap => {
+        const s = snap.val();
+        if(s) {
+            document.getElementById('st-fan').innerText = s.fan ? "ON" : "OFF";
+            document.getElementById('st-humid').innerText = s.humid ? "ON" : "OFF";
+            document.getElementById('st-valve').innerText = s.valve ? "OPEN" : "CLOSED";
+        }
+    });
+
+    // --- 5. NAVIGATION & ANALYTICS ---
+    function toggleMenu() {
+        const m = document.getElementById('menu');
+        m.style.display = (m.style.display === 'block') ? 'none' : 'block';
+    }
+
+    function showSection(target) {
+        document.getElementById('dashboard-view').classList.toggle('hidden', target !== 'dashboard');
+        document.getElementById('analytics-view').classList.toggle('hidden', target !== 'analytics');
+        if(target === 'analytics') renderHistoryChart();
+        toggleMenu();
+    }
+
+    function renderHistoryChart() {
+        db.ref('log_mon').limitToLast(20).once('value', snap => {
+            const data = snap.val();
+            if(!data) return;
+            
+            const labels = Object.keys(data);
+            const humData = Object.values(data).map(d => d.hum);
+            const moistData = Object.values(data).map(d => d.moist);
+            const tempData = Object.values(data).map(d => d.tem);
+
+            new Chart(document.getElementById('historyChart'), {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        { label: 'Humidity', data: humData, borderColor: 'blue', tension: 0.3 },
+                        { label: 'Soil Moisture', data: moistData, borderColor: 'brown', tension: 0.3 },
+                        { label: 'Temperature', data: tempData, borderColor: 'red', tension: 0.3 }
+                    ]
+                },
+                options: { responsive: true, maintainAspectRatio: false }
+            });
+        });
+    }
+
+    function exportExcel() {
+        db.ref('log_mon').once('value', snap => {
+            const data = Object.values(snap.val() || {});
+            const ws = XLSX.utils.json_to_sheet(data);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "EnvironmentLogs");
+            XLSX.writeFile(wb, "FloraFlow_Export.xlsx");
+        });
+        toggleMenu();
+    }
+
+    // Initialize default listener
+    switchDataSource();
+</script>
+</body>
+</html>
